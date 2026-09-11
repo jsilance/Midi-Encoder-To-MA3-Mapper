@@ -1,0 +1,6 @@
+mido
+python-rtmidi
+pyautogui
+pypiwin32
+screeninfo
+pyinstaller
