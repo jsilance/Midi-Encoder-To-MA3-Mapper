@@ -3,27 +3,32 @@ import pyautogui
 import win32api
 import win32con
 import time
+import json
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import threading
 from screeninfo import get_monitors
 
 pyautogui.PAUSE = 0.0001
 
+DEFAULT_L1_Y = 965
+DEFAULT_L2_Y = 900
+DEFAULT_L3_Y = 835
+
 DEFAULT_PAGES_POSITIONS = [
     # Page 1
-    [(200, 965), (550, 965), (895, 965), (1240, 965)],
+    [(200, DEFAULT_L1_Y), (550, DEFAULT_L1_Y), (895, DEFAULT_L1_Y), (1240, DEFAULT_L1_Y)],
     # Page 2
-    [(200, 900), (550, 900), (895, 900), (1240, 900)],
+    [(200, DEFAULT_L2_Y), (550, DEFAULT_L2_Y), (895, DEFAULT_L2_Y), (1240, DEFAULT_L2_Y)],
     # Page 3
-    [(200, 835), (550, 835), (895, 835), (1240, 835)]
+    [(200, DEFAULT_L3_Y), (550, DEFAULT_L3_Y), (895, DEFAULT_L3_Y), (1240, DEFAULT_L3_Y)]
 ]
 
 class EncoderApp:
     def __init__(self, root):
         self.root = root
         self.root.title("MA3 MIDI Controller - Multi Pages")
-        self.root.geometry("380x460")
+        self.root.geometry("400x580")
         self.root.resizable(False, False)
 
         self.running = False
@@ -36,6 +41,10 @@ class EncoderApp:
         self.x_entries_by_page = []
         self.y_entries_by_page = []
         self.learn_btns_by_page = []
+
+        # Variables pour la synchronisation X et Y
+        self.sync_x_vars = []
+        self.sync_y_vars = []
 
         self.setup_ui()
 
@@ -84,7 +93,6 @@ class EncoderApp:
                 entry_cc.grid(row=i+1, column=1, padx=3, pady=2)
                 page_cc.append(entry_cc)
 
-                # Button MIDI Learn
                 btn_learn = tk.Button(
                     page_frame, text="Learn", font=('Helvetica', 8),
                     command=lambda p=page_idx, e=i: self.start_midi_learn(p, e)
@@ -102,10 +110,39 @@ class EncoderApp:
                 entry_y.grid(row=i+1, column=4, padx=3, pady=2)
                 page_y.append(entry_y)
 
+                # Liaison des événements pour la synchronisation à la saisie
+                entry_x.bind("<KeyRelease>", lambda event, p=page_idx, e=i: self.on_coord_change(p, e, 'x'))
+                entry_y.bind("<KeyRelease>", lambda event, p=page_idx, e=i: self.on_coord_change(p, e, 'y'))
+
+            # Checkboxes de Synchronisation X et Y pour la page
+            sync_frame = ttk.Frame(page_frame)
+            sync_frame.grid(row=5, column=0, columnspan=5, pady=6, sticky="w")
+
+            var_sx = tk.BooleanVar(value=False)
+            var_sy = tk.BooleanVar(value=True)  # Vrai par défaut pour synchroniser les lignes Y
+            self.sync_x_vars.append(var_sx)
+            self.sync_y_vars.append(var_sy)
+
+            chk_sx = ttk.Checkbutton(sync_frame, text="Sync X", variable=var_sx,
+                                     command=lambda p=page_idx: self.apply_sync(p, 'x'))
+            chk_sx.pack(side="left", padx=5)
+
+            chk_sy = ttk.Checkbutton(sync_frame, text="Sync Y", variable=var_sy,
+                                     command=lambda p=page_idx: self.apply_sync(p, 'y'))
+            chk_sy.pack(side="left", padx=5)
+
             self.cc_entries_by_page.append(page_cc)
             self.x_entries_by_page.append(page_x)
             self.y_entries_by_page.append(page_y)
             self.learn_btns_by_page.append(page_btns)
+
+        # --- Save / Load Profile ---
+        frame_file = ttk.Frame(self.root)
+        frame_file.pack(fill="x", padx=10, pady=2)
+        btn_save = ttk.Button(frame_file, text="💾 Sauvegarder Config", command=self.save_config)
+        btn_save.pack(side="left", expand=True, fill="x", padx=2)
+        btn_load = ttk.Button(frame_file, text="📂 Charger Config", command=self.load_config)
+        btn_load.pack(side="right", expand=True, fill="x", padx=2)
 
         # --- MIDI Values Configuration ---
         frame_values = ttk.LabelFrame(self.root, text=" MIDI Values ", padding=8)
@@ -131,6 +168,97 @@ class EncoderApp:
         self.btn_toggle = tk.Button(self.root, text="START", bg="#2ed573", fg="white", font=('Helvetica', 11, 'bold'), command=self.toggle_listening)
         self.btn_toggle.pack(pady=10, fill='x', padx=10)
 
+    # --- Synchronisation des Coordonnées ---
+    def on_coord_change(self, page_idx, encoder_idx, axis):
+        if axis == 'x' and self.sync_x_vars[page_idx].get():
+            self.apply_sync(page_idx, 'x', source_idx=encoder_idx)
+        elif axis == 'y' and self.sync_y_vars[page_idx].get():
+            self.apply_sync(page_idx, 'y', source_idx=encoder_idx)
+
+    def apply_sync(self, page_idx, axis, source_idx=0):
+        entries = self.x_entries_by_page[page_idx] if axis == 'x' else self.y_entries_by_page[page_idx]
+        val = entries[source_idx].get()
+        for i, entry in enumerate(entries):
+            if i != source_idx:
+                entry.delete(0, tk.END)
+                entry.insert(0, val)
+
+    # --- Sauvegarde et Chargement JSON ---
+    def save_config(self):
+        config_data = {
+            "screen_index": self.screen_cb.current(),
+            "midi_port": self.midi_var.get(),
+            "val_up": self.val_up_entry.get(),
+            "val_down": self.val_down_entry.get(),
+            "pages": []
+        }
+
+        for p in range(3):
+            page_data = {
+                "sync_x": self.sync_x_vars[p].get(),
+                "sync_y": self.sync_y_vars[p].get(),
+                "encoders": []
+            }
+            for i in range(4):
+                page_data["encoders"].append({
+                    "cc": self.cc_entries_by_page[p][i].get(),
+                    "x": self.x_entries_by_page[p][i].get(),
+                    "y": self.y_entries_by_page[p][i].get()
+                })
+            config_data["pages"].append(page_data)
+
+        file_path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files", "*.json")])
+        if file_path:
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    json.dump(config_data, f, indent=4)
+                messagebox.showinfo("Succès", "Configuration sauvegardée avec succès !")
+            except Exception as e:
+                messagebox.showerror("Erreur", f"Impossible de sauvegarder : {e}")
+
+    def load_config(self):
+        file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+
+            if "screen_index" in config_data and config_data["screen_index"] < len(self.monitors):
+                self.screen_cb.current(config_data["screen_index"])
+            if "midi_port" in config_data and config_data["midi_port"] in self.midi_ports:
+                self.midi_var.set(config_data["midi_port"])
+
+            self.val_up_entry.delete(0, tk.END)
+            self.val_up_entry.insert(0, config_data.get("val_up", "65"))
+
+            self.val_down_entry.delete(0, tk.END)
+            self.val_down_entry.insert(0, config_data.get("val_down", "63"))
+
+            for p, page_data in enumerate(config_data.get("pages", [])):
+                if p >= 3:
+                    break
+                self.sync_x_vars[p].set(page_data.get("sync_x", False))
+                self.sync_y_vars[p].set(page_data.get("sync_y", False))
+
+                for i, enc in enumerate(page_data.get("encoders", [])):
+                    if i >= 4:
+                        break
+                    self.cc_entries_by_page[p][i].delete(0, tk.END)
+                    self.cc_entries_by_page[p][i].insert(0, enc.get("cc", ""))
+
+                    self.x_entries_by_page[p][i].delete(0, tk.END)
+                    self.x_entries_by_page[p][i].insert(0, enc.get("x", ""))
+
+                    self.y_entries_by_page[p][i].delete(0, tk.END)
+                    self.y_entries_by_page[p][i].insert(0, enc.get("y", ""))
+
+            messagebox.showinfo("Succès", "Configuration chargée avec succès !")
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Impossible de charger la configuration : {e}")
+
+    # --- Gestion MIDI Learn ---
     def start_midi_learn(self, page_idx, encoder_idx):
         if self.running:
             return
@@ -161,12 +289,11 @@ class EncoderApp:
         try:
             with mido.open_input(port_name) as inport:
                 start_time = time.time()
-                while self.learning_target and (time.time() - start_time < 10):  # Timeout de 10 sec
+                while self.learning_target and (time.time() - start_time < 10):
                     for msg in inport.iter_pending():
                         if msg.type == 'control_change':
                             cc_num = msg.control
                             page_idx, enc_idx = self.learning_target
-                            
                             self.root.after(0, self._apply_learned_cc, page_idx, enc_idx, cc_num)
                             return
                     time.sleep(0.01)
