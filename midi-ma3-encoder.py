@@ -10,23 +10,30 @@ from screeninfo import get_monitors
 
 pyautogui.PAUSE = 0.0001
 
-DEFAULT_POSITIONS = [
-    (200, 965),
-    (550, 965),
-    (895, 965),
-    (1240, 965),
+# Configuration par défaut des 3 pages
+DEFAULT_PAGES_POSITIONS = [
+    # Page 1
+    [(200, 965), (550, 965), (895, 965), (1240, 965)],
+    # Page 2
+    [(200, 900), (550, 900), (895, 900), (1240, 900)],
+    # Page 3
+    [(200, 835), (550, 835), (895, 835), (1240, 835)]
 ]
 
 class EncoderApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("MA3 MIDI Controller")
+        self.root.title("MA3 MIDI Controller - Multi Pages")
         self.root.geometry("380x440")
         self.root.resizable(False, False)
 
         self.running = False
         self.monitors = get_monitors()
         self.midi_ports = mido.get_input_names()
+
+        self.cc_entries_by_page = []
+        self.x_entries_by_page = []
+        self.y_entries_by_page = []
 
         self.setup_ui()
 
@@ -49,48 +56,60 @@ class EncoderApp:
             self.midi_cb.current(0)
         self.midi_cb.grid(row=1, column=1, pady=2, columnspan=3)
 
-        frame_midi_settings = ttk.LabelFrame(self.root, text=" Encoders Configuration ", padding=8)
-        frame_midi_settings.pack(fill="x", padx=10, pady=5)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill="x", padx=10, pady=5)
 
-        ttk.Label(frame_midi_settings, text="Encoder", font=('Helvetica', 8, 'bold')).grid(row=0, column=0, sticky="w")
-        ttk.Label(frame_midi_settings, text="CC", font=('Helvetica', 8, 'bold')).grid(row=0, column=1)
-        ttk.Label(frame_midi_settings, text="X", font=('Helvetica', 8, 'bold')).grid(row=0, column=2)
-        ttk.Label(frame_midi_settings, text="Y", font=('Helvetica', 8, 'bold')).grid(row=0, column=3)
+        for page_idx in range(3):
+            page_frame = ttk.Frame(self.notebook, padding=8)
+            self.notebook.add(page_frame, text=f"Page {page_idx + 1}")
 
-        self.cc_entries = []
-        self.x_entries = []
-        self.y_entries = []
+            ttk.Label(page_frame, text="Encoder", font=('Helvetica', 8, 'bold')).grid(row=0, column=0, sticky="w")
+            ttk.Label(page_frame, text="CC", font=('Helvetica', 8, 'bold')).grid(row=0, column=1)
+            ttk.Label(page_frame, text="X", font=('Helvetica', 8, 'bold')).grid(row=0, column=2)
+            ttk.Label(page_frame, text="Y", font=('Helvetica', 8, 'bold')).grid(row=0, column=3)
 
-        for i in range(4):
-            ttk.Label(frame_midi_settings, text=f"Encoder {i+1}:").grid(row=i+1, column=0, sticky="w", pady=2)
-            
-            entry_cc = ttk.Entry(frame_midi_settings, width=5)
-            entry_cc.insert(0, str(i + 1))
-            entry_cc.grid(row=i+1, column=1, padx=3, pady=2)
-            self.cc_entries.append(entry_cc)
+            page_cc = []
+            page_x = []
+            page_y = []
 
-            entry_x = ttk.Entry(frame_midi_settings, width=6)
-            entry_x.insert(0, str(DEFAULT_POSITIONS[i][0]))
-            entry_x.grid(row=i+1, column=2, padx=3, pady=2)
-            self.x_entries.append(entry_x)
+            for i in range(4):
+                ttk.Label(page_frame, text=f"Encoder {i+1}:").grid(row=i+1, column=0, sticky="w", pady=2)
 
-            entry_y = ttk.Entry(frame_midi_settings, width=6)
-            entry_y.insert(0, str(DEFAULT_POSITIONS[i][1]))
-            entry_y.grid(row=i+1, column=3, padx=3, pady=2)
-            self.y_entries.append(entry_y)
+                default_cc = (page_idx * 4) + (i + 1)
+                entry_cc = ttk.Entry(page_frame, width=5)
+                entry_cc.insert(0, str(default_cc))
+                entry_cc.grid(row=i+1, column=1, padx=3, pady=2)
+                page_cc.append(entry_cc)
 
-        ttk.Separator(frame_midi_settings, orient='horizontal').grid(row=5, column=0, columnspan=4, sticky='ew', pady=6)
+                entry_x = ttk.Entry(page_frame, width=6)
+                entry_x.insert(0, str(DEFAULT_PAGES_POSITIONS[page_idx][i][0]))
+                entry_x.grid(row=i+1, column=2, padx=3, pady=2)
+                page_x.append(entry_x)
 
-        ttk.Label(frame_midi_settings, text="Increment (+):").grid(row=6, column=0, columnspan=2, sticky="w", pady=2)
-        self.val_up_entry = ttk.Entry(frame_midi_settings, width=6)
+                entry_y = ttk.Entry(page_frame, width=6)
+                entry_y.insert(0, str(DEFAULT_PAGES_POSITIONS[page_idx][i][1]))
+                entry_y.grid(row=i+1, column=3, padx=3, pady=2)
+                page_y.append(entry_y)
+
+            self.cc_entries_by_page.append(page_cc)
+            self.x_entries_by_page.append(page_x)
+            self.y_entries_by_page.append(page_y)
+
+        # --- MIDI Values Configuration ---
+        frame_values = ttk.LabelFrame(self.root, text=" MIDI Values ", padding=8)
+        frame_values.pack(fill="x", padx=10, pady=2)
+
+        ttk.Label(frame_values, text="Increment (+):").grid(row=0, column=0, sticky="w", pady=2)
+        self.val_up_entry = ttk.Entry(frame_values, width=6)
         self.val_up_entry.insert(0, "65")
-        self.val_up_entry.grid(row=6, column=2, padx=3, pady=2)
+        self.val_up_entry.grid(row=0, column=1, padx=3, pady=2)
 
-        ttk.Label(frame_midi_settings, text="Decrement (-):").grid(row=7, column=0, columnspan=2, sticky="w", pady=2)
-        self.val_down_entry = ttk.Entry(frame_midi_settings, width=6)
+        ttk.Label(frame_values, text="Decrement (-):").grid(row=0, column=2, sticky="w", pady=2)
+        self.val_down_entry = ttk.Entry(frame_values, width=6)
         self.val_down_entry.insert(0, "63")
-        self.val_down_entry.grid(row=7, column=2, padx=3, pady=2)
+        self.val_down_entry.grid(row=0, column=3, padx=3, pady=2)
 
+        # --- MIDI Monitor ---
         frame_monitor = ttk.LabelFrame(self.root, text=" MIDI Monitor ", padding=8)
         frame_monitor.pack(fill="x", padx=10, pady=5)
 
@@ -108,10 +127,18 @@ class EncoderApp:
             if not self.midi_ports:
                 messagebox.showerror("Error", "No MIDI device found!")
                 return
-            
+
             try:
-                self.mapped_cc = [int(e.get()) for e in self.cc_entries]
-                self.mapped_positions = [(int(x.get()), int(y.get())) for x, y in zip(self.x_entries, self.y_entries)]
+                self.mapped_pages = []
+                for p in range(3):
+                    page_dict = {}
+                    for i in range(4):
+                        cc = int(self.cc_entries_by_page[p][i].get())
+                        x = int(self.x_entries_by_page[p][i].get())
+                        y = int(self.y_entries_by_page[p][i].get())
+                        page_dict[cc] = (x, y)
+                    self.mapped_pages.append(page_dict)
+
                 self.val_up = int(self.val_up_entry.get())
                 self.val_down = int(self.val_down_entry.get())
             except ValueError:
@@ -136,19 +163,16 @@ class EncoderApp:
         self.midi_cb.config(state=cb_state)
         self.val_up_entry.config(state=state)
         self.val_down_entry.config(state=state)
-        for i in range(4):
-            self.cc_entries[i].config(state=state)
-            self.x_entries[i].config(state=state)
-            self.y_entries[i].config(state=state)
+
+        for p in range(3):
+            for i in range(4):
+                self.cc_entries_by_page[p][i].config(state=state)
+                self.x_entries_by_page[p][i].config(state=state)
+                self.y_entries_by_page[p][i].config(state=state)
 
     def midi_loop(self):
         selected_screen_idx = self.screen_cb.current()
         monitor = self.monitors[selected_screen_idx]
-        
-        abs_encoder_map = {
-            self.mapped_cc[i]: (monitor.x + self.mapped_positions[i][0], monitor.y + self.mapped_positions[i][1])
-            for i in range(4)
-        }
 
         port_name = self.midi_var.get()
 
@@ -160,11 +184,17 @@ class EncoderApp:
                             cc_num = msg.control
                             val = msg.value
 
-                            self.root.after(0, self.monitor_label.config, 
-                                            {"text": f"Last msg : CC {cc_num} | Value : {val}"})
+                            # Récupération dynamique de la page sélectionnée dans l'interface
+                            active_page_idx = self.notebook.index(self.notebook.select())
+                            active_map = self.mapped_pages[active_page_idx]
 
-                            if cc_num in abs_encoder_map:
-                                target_x, target_y = abs_encoder_map[cc_num]
+                            self.root.after(0, self.monitor_label.config, 
+                                            {"text": f"Page {active_page_idx + 1} | CC {cc_num} | Value : {val}"})
+
+                            if cc_num in active_map:
+                                local_x, local_y = active_map[cc_num]
+                                target_x = monitor.x + local_x
+                                target_y = monitor.y + local_y
 
                                 pyautogui.moveTo(target_x, target_y)
                                 time.sleep(0.01)
