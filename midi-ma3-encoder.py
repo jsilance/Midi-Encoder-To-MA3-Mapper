@@ -20,7 +20,7 @@ DEFAULT_PAGES_POSITIONS = [
     # Page 1
     [(200, DEFAULT_L1_Y), (550, DEFAULT_L1_Y), (895, DEFAULT_L1_Y), (1240, DEFAULT_L1_Y)],
     # Page 2
-    [(200, DEFAULT_L2_Y), (550, DEFAULT_L2_Y), (895, DEFAULT_L2_Y), (1240, DEFAULT_L3_Y)],
+    [(200, DEFAULT_L2_Y), (550, DEFAULT_L2_Y), (895, DEFAULT_L2_Y), (1240, DEFAULT_L2_Y)],
     # Page 3
     [(200, DEFAULT_L3_Y), (550, DEFAULT_L3_Y), (895, DEFAULT_L3_Y), (1240, DEFAULT_L3_Y)]
 ]
@@ -29,7 +29,7 @@ class EncoderApp:
     def __init__(self, root):
         self.root = root
         self.root.title("MA3 MIDI Controller - Multi Pages")
-        self.root.geometry("400x580")
+        self.root.geometry("400x610")
         self.root.resizable(False, False)
 
         self.running = False
@@ -38,12 +38,14 @@ class EncoderApp:
         self.monitors = get_monitors()
         self.midi_ports = mido.get_input_names()
 
+        self.active_page_index = 0
+        self.mapped_pages = []
+
         self.cc_entries_by_page = []
         self.x_entries_by_page = []
         self.y_entries_by_page = []
         self.learn_btns_by_page = []
 
-        # Variables pour la synchronisation X et Y
         self.sync_x_vars = []
         self.sync_y_vars = []
 
@@ -73,6 +75,7 @@ class EncoderApp:
         # --- Multi-Page Notebook ---
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="x", padx=10, pady=5)
+        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_change)
 
         for page_idx in range(3):
             page_frame = ttk.Frame(self.notebook, padding=8)
@@ -89,7 +92,7 @@ class EncoderApp:
             for i in range(4):
                 ttk.Label(page_frame, text=f"Encoder {i+1}:").grid(row=i+1, column=0, sticky="w", pady=2)
 
-                default_cc = (page_idx * 4) + (i + 1)
+                default_cc = i + 1
                 entry_cc = ttk.Entry(page_frame, width=5)
                 entry_cc.insert(0, str(default_cc))
                 entry_cc.grid(row=i+1, column=1, padx=3, pady=2)
@@ -112,16 +115,14 @@ class EncoderApp:
                 entry_y.grid(row=i+1, column=4, padx=3, pady=2)
                 page_y.append(entry_y)
 
-                # Liaison des événements pour la synchronisation à la saisie
                 entry_x.bind("<KeyRelease>", lambda event, p=page_idx, e=i: self.on_coord_change(p, e, 'x'))
                 entry_y.bind("<KeyRelease>", lambda event, p=page_idx, e=i: self.on_coord_change(p, e, 'y'))
 
-            # Checkboxes de Synchronisation X et Y pour la page
             sync_frame = ttk.Frame(page_frame)
             sync_frame.grid(row=5, column=0, columnspan=5, pady=6, sticky="w")
 
             var_sx = tk.BooleanVar(value=False)
-            var_sy = tk.BooleanVar(value=True)  # Vrai par défaut pour synchroniser les lignes Y
+            var_sy = tk.BooleanVar(value=True)
             self.sync_x_vars.append(var_sx)
             self.sync_y_vars.append(var_sy)
 
@@ -137,6 +138,7 @@ class EncoderApp:
             self.x_entries_by_page.append(page_x)
             self.y_entries_by_page.append(page_y)
             self.learn_btns_by_page.append(page_btns)
+
 
         # --- Save / Load Profile ---
         frame_file = ttk.Frame(self.root)
@@ -170,7 +172,9 @@ class EncoderApp:
         self.btn_toggle = tk.Button(self.root, text="START", bg="#2ed573", fg="white", font=('Helvetica', 11, 'bold'), command=self.toggle_listening)
         self.btn_toggle.pack(pady=10, fill='x', padx=10)
 
-    # --- Synchronisation des Coordonnées ---
+    def on_tab_change(self, event):
+        self.active_page_index = self.notebook.index(self.notebook.select())
+
     def on_coord_change(self, page_idx, encoder_idx, axis):
         if axis == 'x' and self.sync_x_vars[page_idx].get():
             self.apply_sync(page_idx, 'x', source_idx=encoder_idx)
@@ -185,7 +189,6 @@ class EncoderApp:
                 entry.delete(0, tk.END)
                 entry.insert(0, val)
 
-    # --- Chargement / Sauvegarde des données JSON ---
     def load_default_config(self):
         if os.path.exists("default.json"):
             self._apply_json_data("default.json", show_messages=False)
@@ -216,19 +219,19 @@ class EncoderApp:
                     if i >= 4:
                         break
                     self.cc_entries_by_page[p][i].delete(0, tk.END)
-                    self.cc_entries_by_page[p][i].insert(0, enc.get("cc", ""))
+                    self.cc_entries_by_page[p][i].insert(0, str(enc.get("cc", "")))
 
                     self.x_entries_by_page[p][i].delete(0, tk.END)
-                    self.x_entries_by_page[p][i].insert(0, enc.get("x", ""))
+                    self.x_entries_by_page[p][i].insert(0, str(enc.get("x", "")))
 
                     self.y_entries_by_page[p][i].delete(0, tk.END)
-                    self.y_entries_by_page[p][i].insert(0, enc.get("y", ""))
+                    self.y_entries_by_page[p][i].insert(0, str(enc.get("y", "")))
 
             if show_messages:
-                messagebox.showinfo("Succès", "Configuration chargée avec succès !")
+                messagebox.showinfo("Success", "Configuration loaded successfully!")
         except Exception as e:
             if show_messages:
-                messagebox.showerror("Erreur", f"Impossible de charger la configuration : {e}")
+                messagebox.showerror("Error", f"Unable to load configuration : {e}")
 
     def save_config(self):
         config_data = {
@@ -260,14 +263,13 @@ class EncoderApp:
                     json.dump(config_data, f, indent=4)
                 messagebox.showinfo("Succès", "Configuration sauvegardée avec succès !")
             except Exception as e:
-                messagebox.showerror("Erreur", f"Impossible de sauvegarder : {e}")
+                messagebox.showerror("Erreur", f"Unable to save configuration : {e}")
 
     def load_config(self):
         file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
         if file_path:
             self._apply_json_data(file_path, show_messages=True)
 
-    # --- Gestion MIDI Learn ---
     def start_midi_learn(self, page_idx, encoder_idx):
         if self.running:
             return
@@ -291,7 +293,7 @@ class EncoderApp:
     def _capture_midi_cc(self):
         port_name = self.midi_var.get()
         if not port_name:
-            self.root.after(0, lambda: messagebox.showerror("Error", "No MIDI Port selected!"))
+            self.root.after(0, lambda: messagebox.showerror("Error", "No MIDI port selected!"))
             self.root.after(0, self._reset_learn_button)
             return
 
@@ -340,16 +342,16 @@ class EncoderApp:
                 for p in range(3):
                     page_dict = {}
                     for i in range(4):
-                        cc = int(self.cc_entries_by_page[p][i].get())
-                        x = int(self.x_entries_by_page[p][i].get())
-                        y = int(self.y_entries_by_page[p][i].get())
+                        cc = int(self.cc_entries_by_page[p][i].get().strip())
+                        x = int(self.x_entries_by_page[p][i].get().strip())
+                        y = int(self.y_entries_by_page[p][i].get().strip())
                         page_dict[cc] = (x, y)
                     self.mapped_pages.append(page_dict)
 
-                self.val_up = int(self.val_up_entry.get())
-                self.val_down = int(self.val_down_entry.get())
+                self.val_up = int(self.val_up_entry.get().strip())
+                self.val_down = int(self.val_down_entry.get().strip())
             except ValueError:
-                messagebox.showerror("Error", "Please enter valid integers for CC, X/Y positions, and MIDI values.")
+                messagebox.showerror("Error", "Enter valid numbers.")
                 return
 
             self.running = True
@@ -381,7 +383,6 @@ class EncoderApp:
     def midi_loop(self):
         selected_screen_idx = self.screen_cb.current()
         monitor = self.monitors[selected_screen_idx]
-
         port_name = self.midi_var.get()
 
         try:
@@ -392,27 +393,38 @@ class EncoderApp:
                             cc_num = msg.control
                             val = msg.value
 
-                            active_page_idx = self.notebook.index(self.notebook.select())
-                            active_map = self.mapped_pages[active_page_idx]
+                            only_active = self.listen_active_only_var.get()
+                            pages_to_check = [self.active_page_index] if only_active else range(3)
 
-                            self.root.after(0, self.monitor_label.config, 
-                                            {"text": f"Page {active_page_idx + 1} | CC {cc_num} | Value : {val}"})
+                            target_found = False
+                            for p_idx in pages_to_check:
+                                active_map = self.mapped_pages[p_idx]
+                                if cc_num in active_map:
+                                    local_x, local_y = active_map[cc_num]
+                                    target_x = monitor.x + local_x
+                                    target_y = monitor.y + local_y
 
-                            if cc_num in active_map:
-                                local_x, local_y = active_map[cc_num]
-                                target_x = monitor.x + local_x
-                                target_y = monitor.y + local_y
+                                    self.root.after(0, self.monitor_label.config, 
+                                                    {"text": f"Page {p_idx + 1} | CC {cc_num} | Value : {val}"})
 
-                                pyautogui.moveTo(target_x, target_y)
-                                time.sleep(0.01)
+                                    pyautogui.moveTo(target_x, target_y)
+                                    time.sleep(0.01)
 
-                                if val == self.val_up:
-                                    self.mouse_scroll(1)
-                                elif val == self.val_down:
-                                    self.mouse_scroll(-1)
+                                    if val == self.val_up:
+                                        self.mouse_scroll(1)
+                                    elif val == self.val_down:
+                                        self.mouse_scroll(-1)
+                                    
+                                    target_found = True
+                                    break
+
+                            if not target_found:
+                                self.root.after(0, self.monitor_label.config, 
+                                                {"text": f"Ignored CC {cc_num} | Value : {val}"})
+
                     time.sleep(0.001)
         except Exception as e:
-            print(f"Erreur MIDI : {e}")
+            print(f"Error MIDI : {e}")
 
 if __name__ == "__main__":
     root = tk.Tk()
