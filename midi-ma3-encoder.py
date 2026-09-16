@@ -4,6 +4,7 @@ import win32api
 import win32con
 import time
 import json
+import os
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
@@ -19,7 +20,7 @@ DEFAULT_PAGES_POSITIONS = [
     # Page 1
     [(200, DEFAULT_L1_Y), (550, DEFAULT_L1_Y), (895, DEFAULT_L1_Y), (1240, DEFAULT_L1_Y)],
     # Page 2
-    [(200, DEFAULT_L2_Y), (550, DEFAULT_L2_Y), (895, DEFAULT_L2_Y), (1240, DEFAULT_L2_Y)],
+    [(200, DEFAULT_L2_Y), (550, DEFAULT_L2_Y), (895, DEFAULT_L2_Y), (1240, DEFAULT_L3_Y)],
     # Page 3
     [(200, DEFAULT_L3_Y), (550, DEFAULT_L3_Y), (895, DEFAULT_L3_Y), (1240, DEFAULT_L3_Y)]
 ]
@@ -47,6 +48,7 @@ class EncoderApp:
         self.sync_y_vars = []
 
         self.setup_ui()
+        self.load_default_config()
 
     def setup_ui(self):
         # --- Hardware Configuration ---
@@ -139,9 +141,9 @@ class EncoderApp:
         # --- Save / Load Profile ---
         frame_file = ttk.Frame(self.root)
         frame_file.pack(fill="x", padx=10, pady=2)
-        btn_save = ttk.Button(frame_file, text="💾 Sauvegarder Config", command=self.save_config)
+        btn_save = ttk.Button(frame_file, text="💾 Save Config", command=self.save_config)
         btn_save.pack(side="left", expand=True, fill="x", padx=2)
-        btn_load = ttk.Button(frame_file, text="📂 Charger Config", command=self.load_config)
+        btn_load = ttk.Button(frame_file, text="📂 Load Config", command=self.load_config)
         btn_load.pack(side="right", expand=True, fill="x", padx=2)
 
         # --- MIDI Values Configuration ---
@@ -183,7 +185,51 @@ class EncoderApp:
                 entry.delete(0, tk.END)
                 entry.insert(0, val)
 
-    # --- Sauvegarde et Chargement JSON ---
+    # --- Chargement / Sauvegarde des données JSON ---
+    def load_default_config(self):
+        if os.path.exists("default.json"):
+            self._apply_json_data("default.json", show_messages=False)
+
+    def _apply_json_data(self, file_path, show_messages=True):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+
+            if "screen_index" in config_data and config_data["screen_index"] < len(self.monitors):
+                self.screen_cb.current(config_data["screen_index"])
+            if "midi_port" in config_data and config_data["midi_port"] in self.midi_ports:
+                self.midi_var.set(config_data["midi_port"])
+
+            self.val_up_entry.delete(0, tk.END)
+            self.val_up_entry.insert(0, config_data.get("val_up", "65"))
+
+            self.val_down_entry.delete(0, tk.END)
+            self.val_down_entry.insert(0, config_data.get("val_down", "63"))
+
+            for p, page_data in enumerate(config_data.get("pages", [])):
+                if p >= 3:
+                    break
+                self.sync_x_vars[p].set(page_data.get("sync_x", False))
+                self.sync_y_vars[p].set(page_data.get("sync_y", False))
+
+                for i, enc in enumerate(page_data.get("encoders", [])):
+                    if i >= 4:
+                        break
+                    self.cc_entries_by_page[p][i].delete(0, tk.END)
+                    self.cc_entries_by_page[p][i].insert(0, enc.get("cc", ""))
+
+                    self.x_entries_by_page[p][i].delete(0, tk.END)
+                    self.x_entries_by_page[p][i].insert(0, enc.get("x", ""))
+
+                    self.y_entries_by_page[p][i].delete(0, tk.END)
+                    self.y_entries_by_page[p][i].insert(0, enc.get("y", ""))
+
+            if show_messages:
+                messagebox.showinfo("Succès", "Configuration chargée avec succès !")
+        except Exception as e:
+            if show_messages:
+                messagebox.showerror("Erreur", f"Impossible de charger la configuration : {e}")
+
     def save_config(self):
         config_data = {
             "screen_index": self.screen_cb.current(),
@@ -218,45 +264,8 @@ class EncoderApp:
 
     def load_config(self):
         file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
-        if not file_path:
-            return
-
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-
-            if "screen_index" in config_data and config_data["screen_index"] < len(self.monitors):
-                self.screen_cb.current(config_data["screen_index"])
-            if "midi_port" in config_data and config_data["midi_port"] in self.midi_ports:
-                self.midi_var.set(config_data["midi_port"])
-
-            self.val_up_entry.delete(0, tk.END)
-            self.val_up_entry.insert(0, config_data.get("val_up", "65"))
-
-            self.val_down_entry.delete(0, tk.END)
-            self.val_down_entry.insert(0, config_data.get("val_down", "63"))
-
-            for p, page_data in enumerate(config_data.get("pages", [])):
-                if p >= 3:
-                    break
-                self.sync_x_vars[p].set(page_data.get("sync_x", False))
-                self.sync_y_vars[p].set(page_data.get("sync_y", False))
-
-                for i, enc in enumerate(page_data.get("encoders", [])):
-                    if i >= 4:
-                        break
-                    self.cc_entries_by_page[p][i].delete(0, tk.END)
-                    self.cc_entries_by_page[p][i].insert(0, enc.get("cc", ""))
-
-                    self.x_entries_by_page[p][i].delete(0, tk.END)
-                    self.x_entries_by_page[p][i].insert(0, enc.get("x", ""))
-
-                    self.y_entries_by_page[p][i].delete(0, tk.END)
-                    self.y_entries_by_page[p][i].insert(0, enc.get("y", ""))
-
-            messagebox.showinfo("Succès", "Configuration chargée avec succès !")
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Impossible de charger la configuration : {e}")
+        if file_path:
+            self._apply_json_data(file_path, show_messages=True)
 
     # --- Gestion MIDI Learn ---
     def start_midi_learn(self, page_idx, encoder_idx):
