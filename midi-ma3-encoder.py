@@ -10,7 +10,6 @@ from screeninfo import get_monitors
 
 pyautogui.PAUSE = 0.0001
 
-# Configuration par défaut des 3 pages
 DEFAULT_PAGES_POSITIONS = [
     # Page 1
     [(200, 965), (550, 965), (895, 965), (1240, 965)],
@@ -24,20 +23,24 @@ class EncoderApp:
     def __init__(self, root):
         self.root = root
         self.root.title("MA3 MIDI Controller - Multi Pages")
-        self.root.geometry("380x440")
+        self.root.geometry("380x460")
         self.root.resizable(False, False)
 
         self.running = False
+        self.learning_target = None
+        self.learning_btn = None
         self.monitors = get_monitors()
         self.midi_ports = mido.get_input_names()
 
         self.cc_entries_by_page = []
         self.x_entries_by_page = []
         self.y_entries_by_page = []
+        self.learn_btns_by_page = []
 
         self.setup_ui()
 
     def setup_ui(self):
+        # --- Hardware Configuration ---
         frame_config = ttk.LabelFrame(self.root, text=" Hardware Configuration ", padding=8)
         frame_config.pack(fill="x", padx=10, pady=5)
 
@@ -56,6 +59,7 @@ class EncoderApp:
             self.midi_cb.current(0)
         self.midi_cb.grid(row=1, column=1, pady=2, columnspan=3)
 
+        # --- Multi-Page Notebook ---
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="x", padx=10, pady=5)
 
@@ -65,12 +69,11 @@ class EncoderApp:
 
             ttk.Label(page_frame, text="Encoder", font=('Helvetica', 8, 'bold')).grid(row=0, column=0, sticky="w")
             ttk.Label(page_frame, text="CC", font=('Helvetica', 8, 'bold')).grid(row=0, column=1)
-            ttk.Label(page_frame, text="X", font=('Helvetica', 8, 'bold')).grid(row=0, column=2)
-            ttk.Label(page_frame, text="Y", font=('Helvetica', 8, 'bold')).grid(row=0, column=3)
+            ttk.Label(page_frame, text="Assign", font=('Helvetica', 8, 'bold')).grid(row=0, column=2)
+            ttk.Label(page_frame, text="X", font=('Helvetica', 8, 'bold')).grid(row=0, column=3)
+            ttk.Label(page_frame, text="Y", font=('Helvetica', 8, 'bold')).grid(row=0, column=4)
 
-            page_cc = []
-            page_x = []
-            page_y = []
+            page_cc, page_x, page_y, page_btns = [], [], [], []
 
             for i in range(4):
                 ttk.Label(page_frame, text=f"Encoder {i+1}:").grid(row=i+1, column=0, sticky="w", pady=2)
@@ -81,19 +84,28 @@ class EncoderApp:
                 entry_cc.grid(row=i+1, column=1, padx=3, pady=2)
                 page_cc.append(entry_cc)
 
+                # Button MIDI Learn
+                btn_learn = tk.Button(
+                    page_frame, text="Learn", font=('Helvetica', 8),
+                    command=lambda p=page_idx, e=i: self.start_midi_learn(p, e)
+                )
+                btn_learn.grid(row=i+1, column=2, padx=3, pady=2)
+                page_btns.append(btn_learn)
+
                 entry_x = ttk.Entry(page_frame, width=6)
                 entry_x.insert(0, str(DEFAULT_PAGES_POSITIONS[page_idx][i][0]))
-                entry_x.grid(row=i+1, column=2, padx=3, pady=2)
+                entry_x.grid(row=i+1, column=3, padx=3, pady=2)
                 page_x.append(entry_x)
 
                 entry_y = ttk.Entry(page_frame, width=6)
                 entry_y.insert(0, str(DEFAULT_PAGES_POSITIONS[page_idx][i][1]))
-                entry_y.grid(row=i+1, column=3, padx=3, pady=2)
+                entry_y.grid(row=i+1, column=4, padx=3, pady=2)
                 page_y.append(entry_y)
 
             self.cc_entries_by_page.append(page_cc)
             self.x_entries_by_page.append(page_x)
             self.y_entries_by_page.append(page_y)
+            self.learn_btns_by_page.append(page_btns)
 
         # --- MIDI Values Configuration ---
         frame_values = ttk.LabelFrame(self.root, text=" MIDI Values ", padding=8)
@@ -119,6 +131,62 @@ class EncoderApp:
         self.btn_toggle = tk.Button(self.root, text="START", bg="#2ed573", fg="white", font=('Helvetica', 11, 'bold'), command=self.toggle_listening)
         self.btn_toggle.pack(pady=10, fill='x', padx=10)
 
+    def start_midi_learn(self, page_idx, encoder_idx):
+        if self.running:
+            return
+
+        if self.learning_btn:
+            self.learning_btn.config(text="Learn", bg="SystemButtonFace")
+
+        btn = self.learn_btns_by_page[page_idx][encoder_idx]
+
+        if self.learning_target == (page_idx, encoder_idx):
+            self.learning_target = None
+            self.learning_btn = None
+            return
+
+        self.learning_target = (page_idx, encoder_idx)
+        self.learning_btn = btn
+        btn.config(text="Waiting...", bg="#ffa500")
+
+        threading.Thread(target=self._capture_midi_cc, daemon=True).start()
+
+    def _capture_midi_cc(self):
+        port_name = self.midi_var.get()
+        if not port_name:
+            self.root.after(0, lambda: messagebox.showerror("Error", "No MIDI Port selected!"))
+            self.root.after(0, self._reset_learn_button)
+            return
+
+        try:
+            with mido.open_input(port_name) as inport:
+                start_time = time.time()
+                while self.learning_target and (time.time() - start_time < 10):  # Timeout de 10 sec
+                    for msg in inport.iter_pending():
+                        if msg.type == 'control_change':
+                            cc_num = msg.control
+                            page_idx, enc_idx = self.learning_target
+                            
+                            self.root.after(0, self._apply_learned_cc, page_idx, enc_idx, cc_num)
+                            return
+                    time.sleep(0.01)
+        except Exception as e:
+            print(f"MIDI Learn Error: {e}")
+
+        self.root.after(0, self._reset_learn_button)
+
+    def _apply_learned_cc(self, page_idx, enc_idx, cc_num):
+        entry = self.cc_entries_by_page[page_idx][enc_idx]
+        entry.delete(0, tk.END)
+        entry.insert(0, str(cc_num))
+        self._reset_learn_button()
+
+    def _reset_learn_button(self):
+        if self.learning_btn:
+            self.learning_btn.config(text="Learn", bg="SystemButtonFace")
+        self.learning_target = None
+        self.learning_btn = None
+
     def mouse_scroll(self, clicks):
         win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0, clicks * 120, 0)
 
@@ -127,6 +195,9 @@ class EncoderApp:
             if not self.midi_ports:
                 messagebox.showerror("Error", "No MIDI device found!")
                 return
+
+            if self.learning_target:
+                self._reset_learn_button()
 
             try:
                 self.mapped_pages = []
@@ -169,6 +240,7 @@ class EncoderApp:
                 self.cc_entries_by_page[p][i].config(state=state)
                 self.x_entries_by_page[p][i].config(state=state)
                 self.y_entries_by_page[p][i].config(state=state)
+                self.learn_btns_by_page[p][i].config(state=state)
 
     def midi_loop(self):
         selected_screen_idx = self.screen_cb.current()
@@ -184,7 +256,6 @@ class EncoderApp:
                             cc_num = msg.control
                             val = msg.value
 
-                            # Récupération dynamique de la page sélectionnée dans l'interface
                             active_page_idx = self.notebook.index(self.notebook.select())
                             active_map = self.mapped_pages[active_page_idx]
 
