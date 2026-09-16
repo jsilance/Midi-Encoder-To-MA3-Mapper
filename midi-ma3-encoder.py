@@ -49,6 +49,9 @@ class EncoderApp:
         self.sync_x_vars = []
         self.sync_y_vars = []
 
+        # Instanciation explicite pour éviter tout AttributeError
+        self.listen_active_only_var = tk.BooleanVar(value=False)
+
         self.setup_ui()
         self.load_default_config()
 
@@ -139,6 +142,15 @@ class EncoderApp:
             self.y_entries_by_page.append(page_y)
             self.learn_btns_by_page.append(page_btns)
 
+        # Mode d'écoute des pages
+        frame_mode = ttk.Frame(self.root)
+        frame_mode.pack(fill="x", padx=10, pady=2)
+        chk_mode = ttk.Checkbutton(
+            frame_mode, 
+            text="Écouter uniquement la Page sélectionnée à l'écran", 
+            variable=self.listen_active_only_var
+        )
+        chk_mode.pack(anchor="w", padx=5)
 
         # --- Save / Load Profile ---
         frame_file = ttk.Frame(self.root)
@@ -228,10 +240,10 @@ class EncoderApp:
                     self.y_entries_by_page[p][i].insert(0, str(enc.get("y", "")))
 
             if show_messages:
-                messagebox.showinfo("Success", "Configuration loaded successfully!")
+                messagebox.showinfo("Succès", "Configuration chargée avec succès !")
         except Exception as e:
             if show_messages:
-                messagebox.showerror("Error", f"Unable to load configuration : {e}")
+                messagebox.showerror("Erreur", f"Impossible de charger la configuration : {e}")
 
     def save_config(self):
         config_data = {
@@ -263,7 +275,7 @@ class EncoderApp:
                     json.dump(config_data, f, indent=4)
                 messagebox.showinfo("Succès", "Configuration sauvegardée avec succès !")
             except Exception as e:
-                messagebox.showerror("Erreur", f"Unable to save configuration : {e}")
+                messagebox.showerror("Erreur", f"Impossible de sauvegarder la configuration : {e}")
 
     def load_config(self):
         file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
@@ -293,7 +305,7 @@ class EncoderApp:
     def _capture_midi_cc(self):
         port_name = self.midi_var.get()
         if not port_name:
-            self.root.after(0, lambda: messagebox.showerror("Error", "No MIDI port selected!"))
+            self.root.after(0, lambda: messagebox.showerror("Error", "Aucun port MIDI sélectionné !"))
             self.root.after(0, self._reset_learn_button)
             return
 
@@ -331,7 +343,7 @@ class EncoderApp:
     def toggle_listening(self):
         if not self.running:
             if not self.midi_ports:
-                messagebox.showerror("Error", "No MIDI device found!")
+                messagebox.showerror("Error", "Aucun périphérique MIDI trouvé !")
                 return
 
             if self.learning_target:
@@ -351,7 +363,7 @@ class EncoderApp:
                 self.val_up = int(self.val_up_entry.get().strip())
                 self.val_down = int(self.val_down_entry.get().strip())
             except ValueError:
-                messagebox.showerror("Error", "Enter valid numbers.")
+                messagebox.showerror("Error", "Veuillez entrer des nombres entiers valides sur toutes les pages.")
                 return
 
             self.running = True
@@ -362,7 +374,7 @@ class EncoderApp:
             self.thread.start()
         else:
             self.running = False
-            self.btn_toggle.config(text="START", bg="#2ed573")
+            self.btn_toggle.config(text="STOP", bg="#2ed573")
             self.lock_inputs(False)
 
     def lock_inputs(self, lock):
